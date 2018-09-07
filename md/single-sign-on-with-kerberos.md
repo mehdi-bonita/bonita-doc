@@ -38,15 +38,11 @@ The scenario covered by the filter is the following:
 - The Bonita Kerberos filter intercepts all the requests to bonita portal pages, and checks if the user is already logged in on Bonita 
     
     - If already logged in => Allow the access
-    - If not logged in => The request is transferred to the Spnego filter
+    - If not logged in => The request is transferred to the Spnego authenticator
 
-The Spnego filter will then verify the user’s Kerberos tickets if present or create a new one. After obtaining a valid ticket the filter will store some information (the authenticated user login) in the client request and get back to the Bonita Kerberos filter.
+The Spnego authenticator will then verify the user’s Kerberos tickets if present or create a new one. After obtaining a valid ticket the filter will store some information (the authenticated user login) in the client request and get back to the Bonita Kerberos filter.
 	
 - The Bonita Kerberos filter will automatically create a Bonita session and let the user through to access the Portal resources.
-	
-:::info 
-**Note:** The Spnego filter is called programmatically by the Bonita Kerberos filter. It is not deployed as a standard web application filter in the application descriptor (web.xml). This is done in order to allow bi-directional exchanges with the Bonita Kerberos filter (regular web filters are only chained in one direction).
-:::
 
 ::: warning  
  Bonita "username" should match the authenticated user login returned in the client response. 
@@ -131,7 +127,7 @@ To configure Bonita for Kerberos:
     1. Run it a first time, so that the first default tenant is created (TENANT_ID = 1)
     1. Stop it before modifying the configuration files below
 	
-2. You will need to edit the Kerberos configuration file in order to select the desired encryption types used to secure the communication. In the following folder `<BUNDLE_HOME>/server/conf`,
+2. You will need to edit the Kerberos configuration file in order to select the desired encryption types used to secure the communication. In the following folder `<BUNDLE_HOME>/server/conf` (Tomcat) or `<BUNDLE_HOME>/server/bin` (Wildfly),
 	edit the krb5.conf file as follows:
 	
 ```	
@@ -158,7 +154,7 @@ if you want to use the AES256-CTS encryption type, you need to update the Java s
 	* For Java updates < Java 8 u162, you have to download the security libraries [Here](http://www.oracle.com/technetwork/java/javase/downloads/jce8-download-2133166.html)
 		These libraries need to be put in jre/lib/security and jdk/jre/lib/security.
 
-3. In the following folder `<BUNDLE_HOME>/server/conf`,
+3. (Tomcat) In the following folder `<BUNDLE_HOME>/server/conf`,
 	edit the login.conf file as follows:
 	
 ```	
@@ -173,6 +169,31 @@ if you want to use the AES256-CTS encryption type, you need to update the Java s
 	};
 ```
 	
+3. (Wildfly) In the following folder `<BUNDLE_HOME>/setup/wildfly-templates`,
+	edit the standalone.xml file as follows:
+	
+In:
+```	
+<subsystem xmlns="urn:jboss:domain:security:1.2">
+            <security-domains>
+```
+Make sure the following security domains are present:
+```
+		<security-domain name="spnego-server">
+			<authentication>
+			  <login-module code="com.sun.security.auth.module.Krb5LoginModule" flag="required">
+				<module-option name="storeKey" value="true"/>
+				<module-option name="isInitiator" value="false"/>
+			  </login-module>
+			</authentication>
+		</security-domain>
+		<security-domain name="spnego-client">
+			<authentication>
+			  <login-module code="com.sun.security.auth.module.Krb5LoginModule" flag="required"/>
+			</authentication>
+		</security-domain>
+```
+	
 4. In the tenant_portal folder of each existing tenant: `<BUNDLE_HOME>/setup/platform_conf/current/tenants/<TENANT_ID>/tenant_portal`,
    edit the authenticationManager-config.properties as follows:
    
@@ -183,7 +204,7 @@ if you want to use the AES256-CTS encryption type, you need to update the Java s
    
 	-->	auth.AuthenticationManager = org.bonitasoft.console.common.server.auth.impl.kerberos.RemoteAuthenticationManagerImpl
 	-->	kerberos.filter.active = true
-	-->	kerberos.auth.standard.allowed = true
+	-->	kerberos.auth.standard.allowed = false
 	-->	auth.tenant.admin.username = install
 	-->	auth.tenant.standard.whitelist = william.jobs
 	-->	auth.passphrase = Bonita
@@ -197,25 +218,26 @@ if you want to use the AES256-CTS encryption type, you need to update the Java s
 Make sure to [set the right tenant admin username](multi-tenancy-and-tenant-configuration#toc2).
 It is recommended to also replace the value of the passphrase (property auth.passphrase) which is used by the engine to verify the authentication request.
 The value must be the same as in the file **bonita-tenant-sp-custom.properties**.  
-If some users need to bypass kerberos authentication method, you can authorize it by setting the property `kerberos.auth.standard.allowed` to true. Users will then be able to log in using the portal login page (/login.jsp) provided they have a bonita account and their password is different from their username.
+If the users need to bypass kerberos authentication method, you can authorize it by setting the property `kerberos.auth.standard.allowed` to true. Users will then be able to log in using the portal login page (/login.jsp) provided they have a bonita account and their password is different from their username.  
+If only a limited group of users need to bypass kerberos authentication method you can restrain it by setting the property `kerberos.auth.standard.allowed` to false and setting the property `auth.tenant.standard.whitelist` with the list of authorized usernames (coma separated).
 
 5. In the tenant_portal folder of each existing tenant: `<BUNDLE_HOME>/setup/platform_conf/current/tenants/<TENANT_ID>/tenant_portal`,
    edit the spnego-config.properties file as follows:
-   
 ```
-	-->  spnego.allow.basic          = true
+	-->      spnego.allow.basic          = true
 	-->	 spnego.allow.localhost      = true
 	-->	 spnego.allow.unsecure.basic = true
 	-->	 spnego.login.client.module  = spnego-client
-	-->	 spnego.krb5.conf            = krb5.conf
-	-->	 spnego.login.conf           = login.conf
+	-->	 spnego.krb5.conf            = conf/krb5.conf
+	-->	 spnego.login.conf           = conf/login.conf
 	-->	 spnego.login.server.module  = spnego-server
 	-->	 spnego.prompt.ntlm          = true
 	-->	 spnego.logger.level         = 1
 	-->	 spnego.preauth.username     = bonita.tomcat
 	-->	 spnego.preauth.password     = Bonita2017 
 ```
-    
+Note that for Wildfly, the properties `spnego.krb5.conf` and `spnego.login.conf` are not used as already set in the file satndalone.xml
+
 Make sure to set your principal user name and password.	
 
 6. In the tenant_engine folder of each existing tenant: `<BUNDLE_HOME>/setup/platform_conf/current/tenants/<TENANT_ID>/tenant_engine/`,
@@ -267,7 +289,7 @@ It is recommended to also replace the value of the passphrase (property auth.pas
 
 8. If your Domain Controller is correctly configured, you are done.  
 Then you can try to access a portal page, an app page or a form URL (or just `http://<host>:<port>/bonita[?tenant=<tenantId>]`) and make sure that you are automatically logged in.  
-Note that if you try to access `http://<bundle host>:<port>/bonita/login.jsp`, then you won't be redirected as this page still needs to be accessible in order for the tenant administrator (or another user if you set the property `saml.auth.standard.allowed` to true) to be able to log in without an account on AD.
+Note that if you try to access `http://<bundle host>:<port>/bonita/login.jsp`, then you won't be redirected as this page still needs to be accessible in order for the tenant administrator (or another user if you set the property `kerberos.auth.standard.allowed` to true or define a whitelist with the property `auth.tenant.standard.whitelist`) to be able to log in without an account on AD.
 
 
 ## Logout behavior
@@ -293,7 +315,7 @@ org.bonitasoft.engine.authentication.level = ALL
 com.bonitasoft.engine.authentication.level = ALL
 ```
 
-In a WildFly bundle, you need to edit the file `<BUNDLE_HOME>/server/standalone/configuration/standalone.xml` in the domain `urn:jboss:domain:logging:3.0` of the *subsystem* tag.
+In a WildFly bundle, you need to edit the file `<BUNDLE_HOME>/setup/wildfly-templates/standalone.xml` in the domain `urn:jboss:domain:logging:3.0` of the *subsystem* tag.
 
 Edit the *logger* tags which *category* matches `org.bonitasoft.console.common.server.auth`, `org.bonitasoft.engine.authentication` and `com.bonitasoft.engine.authentication` packages: change the *level* *name* attribute of each *logger* to `ALL` and add a new logger with the *category* `net.sourceforge.spnego` (also with a *level* *name* set to `ALL`).
 
@@ -310,12 +332,12 @@ The LDAP synchronizer user must be registered in Bonita (no need for an LDAP/AD 
 We recommend that you use LDAP or AD as your master source for information, synchronizing the relevant information with your Bonita platform.
 
 ::: info
-**Note :** By default the [LDAP synchronizer](ldap-synchronizer.md) sets the password of the accounts created with the same value as the username. So, even if you allow standard authentication (by setting the property `saml.auth.standard.allowed` in **authenticationManager-config.properties**), users won't be able to log in with the portal login page directly without going through the IdP.   
+**Note :** By default the [LDAP synchronizer](ldap-synchronizer.md) sets the password of the accounts created with the same value as the username. So, even if you allow standard authentication (by setting the property `kerberos.auth.standard.allowed` in **authenticationManager-config.properties**), users won't be able to log in with the portal login page directly without going through the Domain Controller.   
 :::
 
 ## Single sign-on with Kerberos using the REST API
 
-Kerberos is a browser-oriented protocol (based on http automatic redirection, forms, etc...), therefore only resources that require a direct access from a web browser are handled by the Kerberos filter. 
+Only resources that require a direct access from a web browser are handled by the Kerberos filter. 
 Access to other resources won't trigger a Kerberos authentication process. 
 Here is the subset of pages filtered by the Kerberos filter:
 
